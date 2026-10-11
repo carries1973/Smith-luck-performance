@@ -1,0 +1,24 @@
+name: Validate workout journal
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [fix/workout-journal-ux]
+  workflow_dispatch:
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm exec eslint app/page.tsx
+      - run: pnpm build
