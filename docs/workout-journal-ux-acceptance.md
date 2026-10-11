@@ -1,34 +1,31 @@
-# Smith Luck Performance — UI/UX repair acceptance plan
+# Smith Luck Performance — workout journal acceptance
 
-Status: implementation pending. This document is a tracked specification, not a claim that the features work.
+Status: final application fixes merged into main in PR #2. The older WIP branch has been reconciled with that exact application version. This branch retains validation automation and acceptance tracking.
 
-## Work sequence
-1. Standardize all 7 workout screens and fix known duplicate calendar, wrong day label, inconsistent set counts, interval timing/RPE and notes placement defects.
-2. Implement timer alerts.
-3. Implement unilateral set tracking.
-4. Implement previous session summaries and exact-exercise history.
-5. Test on iPhone installed PWA, including reload and resume.
-6. Only after user approval, design and integrate Supabase.
+## Implemented
+- Shared session date, total workout timer, progress, notes and previous-session context across days 1–7.
+- Rest/recovery countdowns stored in workout drafts; activated three-tone audio and visible countdown completion; cycling transition audio uses the same activated context.
+- A foreground sound-test button with the screen-awake requirement disclosed.
+- Independent left/right weight, reps, RPE and completion for per-side exercises, including dead bug. Both sides are required for full completion.
+- Previous same-day session summaries and exact-exercise per-set history with notes, including each side.
+- Existing storage keys and older combined entries are preserved. No synthetic left/right values are generated from combined entries.
+- Seconds/minutes are labeled for timed strength-day entries.
 
-## Timer alerts
-- Rest and cycling interval countdowns must alert once at zero: visible status, optional sound, vibration when supported.
-- Offer sound on/off; test iPhone Safari/Home Screen foreground and background separately. Never promise locked-screen alerts without validation.
-- Pause/resume/reset must not duplicate or lose alerts.
+## Validation completed
+- TypeScript check passed.
+- Production build passed.
+- ESLint for app/page.tsx passed.
+- Server-rendered checks for all seven days: one session-date control, shared workout controls and summaries, prescribed left/right row counts.
+- Logging helper checks: both-side completion, partial-side history, invalid reps/RPE, legacy combined-entry formatting and timed units.
+- Mock AudioContext check: activation from user interaction and three alert tones.
 
-## Bilateral/unilateral logging
-- Keep bilateral movements as one set entry, with an explicit weight-unit convention (total/per-hand).
-- Unilateral exercises store independent left/right weight, reps, RPE, done flags **per set**.
-- Applicable current exercises include one-arm DB row, Bulgarian split squat, reverse lunge, single-leg RDL, alternating curl; confirm any other side-specific movement.
-- Keep existing journal data readable when extending the model. Ensure session history includes both sides.
+## Outstanding acceptance checks
+- Direct browser/mobile visual and interaction QA, including installed iPhone Home Screen mode, reload/resume, and countdown pause/reset/zero transitions.
+- Test alerts alongside Spotify in Safari and installed Home Screen mode; mixing, ducking and uninterrupted playback are not verified.
+- Background/locked-screen alerts are not promised. Vibration is unavailable in iPhone Safari.
+- Dedicated sound on/off preference and explicit bilateral dumbbell weight convention remain follow-up items from the earlier WIP specification.
+- Verify the original Cloudflare Workers URL deploys the merged main commit; source merge alone is not proof of deployment.
+- Supabase remains deferred.
 
-## Previous results
-- On opening a workout, show a collapsible last completed comparable training-day summary with date, duration, sets, notes.
-- On each exercise card show latest exact-exercise result with per-set weight/reps/RPE, left/right where applicable.
-- Distinguish identical exercise from conjugate variation. Show an honest empty state if no prior session exists.
-- Source all results from persisted sessions, not placeholder values.
-
-## Definition of done
-- Test days 1–7, all strength exercise cards, cycling work/rest transitions, recovery logging, and date navigation.
-- Test separate side logging, reloading, saved session history and accurate prior comparisons.
-- Verify accessible mobile layouts and no duplicate calendars or missing timers.
-- Record evidence of testing before merging into main.
+## Data and deployment
+History and drafts remain browser-local and tied to the website origin. Publishing at another origin does not move journal data. Use the original Cloudflare address for production verification.
