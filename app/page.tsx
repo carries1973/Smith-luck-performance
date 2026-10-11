@@ -1405,7 +1405,9 @@ function PreviousPerformance({
   exercise: Exercise;
   history: SessionLog[];
 }) {
-  const previous = history.find((session) => session.exercises?.[exercise.id])
+  const previous = [...history]
+    .sort((a, b) => b.completedAt.localeCompare(a.completedAt))
+    .find((session) => session.exercises?.[exercise.id])
     ?.exercises[exercise.id];
   const completed =
     previous?.sets.filter((set) => exercise.unilateral ? set.left?.done && set.right?.done : set.done && set.weight && set.reps) ?? [];
@@ -1866,7 +1868,14 @@ function WorkoutScreen({
     Array.from(
       { length: exercise.sets },
       (_, index) => draft.sets[exercise.id]?.[index],
-    ).every((row) => exercise.unilateral ? Boolean(row?.left?.done && row.left.reps.trim() && row.left.rpe.trim() && row?.right?.done && row.right.reps.trim() && row.right.rpe.trim()) : Boolean(row?.done && row.reps.trim() && row.rpe.trim())),
+    ).every((row) =>
+      exercise.unilateral
+        ? Boolean(
+            row?.left?.done && row?.left?.reps?.trim() && row?.left?.rpe?.trim() &&
+            row?.right?.done && row?.right?.reps?.trim() && row?.right?.rpe?.trim(),
+          )
+        : Boolean(row?.done && row?.reps?.trim() && row?.rpe?.trim()),
+    ),
   );
   const recoveryDone = (day.recovery ?? []).filter(
     (module) => draft.recoveryCompleted[module.id],
@@ -2006,7 +2015,7 @@ function WorkoutScreen({
         <details className="previous-stack">
           <summary>Last {day.name} session</summary>
           {(() => {
-            const last = history.find((session) => session.dayId === day.id);
+            const last = [...history].sort((a, b) => b.completedAt.localeCompare(a.completedAt)).find((session) => session.dayId === day.id);
             if (!last) return null;
             return (
               <div className="previous-performance">
