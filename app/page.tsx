@@ -1211,6 +1211,7 @@ function RestTimer({ initial }: { initial: number }) {
   const [remaining, setRemaining] = useState(initial);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [base, setBase] = useState(initial);
+  const [alertDone, setAlertDone] = useState(false);
   useEffect(() => {
     if (!startedAt) return;
     const tick = () => {
@@ -1219,7 +1220,29 @@ function RestTimer({ initial }: { initial: number }) {
         base - Math.floor((Date.now() - startedAt) / 1000),
       );
       setRemaining(next);
-      if (next === 0) setStartedAt(null);
+      if (next === 0) {
+        setAlertDone(true);
+        setStartedAt(null);
+        try {
+          navigator.vibrate?.([200, 100, 200]);
+          const AudioCtor = window.AudioContext ||
+            (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+          if (AudioCtor) {
+            const audio = new AudioCtor();
+            const tone = audio.createOscillator();
+            const volume = audio.createGain();
+            tone.frequency.value = 880;
+            volume.gain.value = 0.12;
+            tone.connect(volume);
+            volume.connect(audio.destination);
+            tone.start();
+            tone.stop(audio.currentTime + 0.35);
+            tone.onended = () => void audio.close();
+          }
+        } catch {
+          // Foreground audio may be restricted by the browser.
+        }
+      }
     };
     tick();
     const timer = window.setInterval(tick, 500);
@@ -1229,9 +1252,10 @@ function RestTimer({ initial }: { initial: number }) {
     if (startedAt) {
       setBase(remaining);
       setStartedAt(null);
-    } else setStartedAt(Date.now());
+    } else { setAlertDone(false); setStartedAt(Date.now()); }
   };
   const reset = () => {
+    setAlertDone(false);
     setStartedAt(null);
     setBase(initial);
     setRemaining(initial);
@@ -1240,7 +1264,7 @@ function RestTimer({ initial }: { initial: number }) {
     <div className="rest-timer">
       <div>
         <TimerReset />
-        <span>Rest timer</span>
+        <span>{alertDone ? "Rest complete — next set" : "Rest timer"}</span>
         <strong>{formatShortTime(remaining)}</strong>
       </div>
       <div>
@@ -1937,6 +1961,24 @@ function WorkoutScreen({
             </div>
           </div>
         </section>
+      )}
+      {history.some((session) => session.dayId === day.id) && (
+        <details className="previous-stack">
+          <summary>Last {day.name} session</summary>
+          {(() => {
+            const last = history.find((session) => session.dayId === day.id);
+            if (!last) return null;
+            return (
+              <div className="previous-performance">
+                <strong>{last.date} · {formatTime(last.duration)}</strong>
+                <p>{Object.entries(last.exercises).map(([id, log]) =>
+                  `${day.exercises?.find((exercise) => exercise.id === id)?.name ?? id}: ${log.sets.filter((set) => set.done).map((set) => `${set.weight || "BW"} lb × ${set.reps} (RPE ${set.rpe || "—"})`).join(", ")}`
+                ).join(" | ") || "No strength sets recorded."}</p>
+                {last.workoutNotes && <p>Notes: {last.workoutNotes}</p>}
+              </div>
+            );
+          })()}
+        </details>
       )}
       <WorkoutTimer
         draft={draft}
