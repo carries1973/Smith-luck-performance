@@ -2012,7 +2012,7 @@ function WorkoutScreen({
               <div className="previous-performance">
                 <strong>{last.date} · {formatTime(last.duration)}</strong>
                 <p>{Object.entries(last.exercises).map(([id, log]) =>
-                  `${day.exercises?.find((exercise) => exercise.id === id)?.name ?? id}: ${log.sets.filter((set) => set.done).map((set) => `${set.weight || "BW"} lb × ${set.reps} (RPE ${set.rpe || "—"})`).join(", ")}`
+                  `${day.exercises?.find((exercise) => exercise.id === id)?.name ?? id}: ${log.sets.map((set) => set.left || set.right ? `L ${set.left?.weight || "—"} lb × ${set.left?.reps || "—"} / R ${set.right?.weight || "—"} lb × ${set.right?.reps || "—"}` : set.done ? `${set.weight || "BW"} lb × ${set.reps} (RPE ${set.rpe || "—"})` : "").filter(Boolean).join(", ")}`
                 ).join(" | ") || "No strength sets recorded."}</p>
                 {last.workoutNotes && <p>Notes: {last.workoutNotes}</p>}
               </div>
@@ -2440,9 +2440,11 @@ function HistoryView({
                             <p>
                               {log.sets
                                 .map((set, index) =>
-                                  set.done
-                                    ? `S${index + 1}: ${set.weight || "—"} lb × ${set.reps || "—"} @ ${set.rpe || "—"}`
-                                    : null,
+                                  set.left || set.right
+                                    ? `S${index + 1}: L ${set.left?.weight || "—"} lb × ${set.left?.reps || "—"} @ ${set.left?.rpe || "—"}; R ${set.right?.weight || "—"} lb × ${set.right?.reps || "—"} @ ${set.right?.rpe || "—"}`
+                                    : set.done
+                                      ? `S${index + 1}: ${set.weight || "—"} lb × ${set.reps || "—"} @ ${set.rpe || "—"}`
+                                      : null,
                                 )
                                 .filter(Boolean)
                                 .join(" · ") || "No completed sets"}
