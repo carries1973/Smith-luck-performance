@@ -47,6 +47,7 @@ type Exercise = {
   rpe: string;
   rest: number;
   note: string;
+  unilateral?: boolean;
 };
 type RecoveryModule = {
   id: string;
@@ -65,7 +66,8 @@ type WorkoutDay = {
   exercises?: Exercise[];
   recovery?: RecoveryModule[];
 };
-type SetEntry = { weight: string; reps: string; rpe: string; done: boolean };
+type SideEntry = { weight: string; reps: string; rpe: string; done: boolean };
+type SetEntry = SideEntry & { left?: SideEntry; right?: SideEntry };
 type Readiness = {
   sleep: number;
   energy: number;
@@ -145,6 +147,7 @@ const workoutDays: WorkoutDay[] = [
       },
       {
         id: "row",
+        unilateral: true,
         name: "One-arm Dumbbell Row",
         type: "Strength pull",
         sets: 4,
@@ -226,6 +229,7 @@ const workoutDays: WorkoutDay[] = [
       },
       {
         id: "split-squat",
+        unilateral: true,
         name: "Bulgarian Split Squat",
         type: "Single-leg",
         sets: 3,
@@ -375,6 +379,7 @@ const workoutDays: WorkoutDay[] = [
       },
       {
         id: "curl",
+        unilateral: true,
         name: "Alternating Dumbbell Curl",
         type: "Accessory",
         sets: 3,
@@ -416,6 +421,7 @@ const workoutDays: WorkoutDay[] = [
       },
       {
         id: "reverse-lunge",
+        unilateral: true,
         name: "Dumbbell Reverse Lunge",
         type: "Single-leg",
         sets: 3,
@@ -426,6 +432,7 @@ const workoutDays: WorkoutDay[] = [
       },
       {
         id: "single-rdl",
+        unilateral: true,
         name: "Single-leg Romanian Deadlift",
         type: "Balance + posterior chain",
         sets: 3,
@@ -1309,6 +1316,33 @@ function SetLogger({
     { length: exercise.sets },
     (_, i) => values[i] ?? { weight: "", reps: "", rpe: "", done: false },
   );
+  const updateSide = (index: number, side: "left" | "right", key: keyof SideEntry, value: string | boolean) => {
+    const next = [...rows];
+    const old = next[index][side] ?? { weight: "", reps: "", rpe: "", done: false };
+    next[index] = { ...next[index], [side]: { ...old, [key]: value } };
+    onChange(next);
+  };
+  if (exercise.unilateral) return (
+    <div className="set-logger">
+      {rows.map((row, index) => (
+        <div className="previous-stack" key={index}>
+          <strong>Set {index + 1} · Left / Right</strong>
+          {(["left", "right"] as const).map((side) => {
+            const entry = row[side] ?? { weight: "", reps: "", rpe: "", done: false };
+            return (
+              <div className="set-grid" key={side}>
+                <strong>{side === "left" ? "L" : "R"}</strong>
+                <Input inputMode="decimal" aria-label={`${exercise.name} set ${index + 1} ${side} weight`} placeholder="lb" value={entry.weight} onChange={(e) => updateSide(index, side, "weight", e.target.value)} />
+                <Input inputMode="numeric" aria-label={`${exercise.name} set ${index + 1} ${side} reps`} placeholder="reps" value={entry.reps} onChange={(e) => updateSide(index, side, "reps", e.target.value)} />
+                <Input inputMode="decimal" aria-label={`${exercise.name} set ${index + 1} ${side} RPE`} placeholder="RPE" value={entry.rpe} onChange={(e) => updateSide(index, side, "rpe", e.target.value)} />
+                <button className={`set-check ${entry.done ? "checked" : ""}`} aria-label={`Mark ${exercise.name} set ${index + 1} ${side} complete`} aria-pressed={entry.done} onClick={() => updateSide(index, side, "done", !entry.done)}>{entry.done && <Check />}</button>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
   const change = (
     index: number,
     key: keyof SetEntry,
@@ -1374,7 +1408,7 @@ function PreviousPerformance({
   const previous = history.find((session) => session.exercises?.[exercise.id])
     ?.exercises[exercise.id];
   const completed =
-    previous?.sets.filter((set) => set.done && set.weight && set.reps) ?? [];
+    previous?.sets.filter((set) => exercise.unilateral ? set.left?.done && set.right?.done : set.done && set.weight && set.reps) ?? [];
   if (!completed.length)
     return (
       <div className="previous-performance">
@@ -1382,6 +1416,12 @@ function PreviousPerformance({
         <strong>Establish your baseline today</strong>
       </div>
     );
+  if (exercise.unilateral) return (
+    <div className="previous-performance">
+      <span>Previous left / right performance</span>
+      {completed.map((set, index) => <p key={index}>Set {index + 1}: L {set.left?.weight || "—"} lb × {set.left?.reps || "—"} (RPE {set.left?.rpe || "—"}) · R {set.right?.weight || "—"} lb × {set.right?.reps || "—"} (RPE {set.right?.rpe || "—"})</p>)}
+    </div>
+  );
   const top = [...completed].sort(
     (a, b) => Number(b.weight) - Number(a.weight),
   )[0];
@@ -1819,14 +1859,14 @@ function WorkoutScreen({
       Array.from(
         { length: exercise.sets },
         (_, index) => draft.sets[exercise.id]?.[index],
-      ).filter((row) => row?.done).length,
+      ).filter((row) => exercise.unilateral ? row?.left?.done && row?.right?.done : row?.done).length,
     0,
   );
   const validSets = exercises.every((exercise) =>
     Array.from(
       { length: exercise.sets },
       (_, index) => draft.sets[exercise.id]?.[index],
-    ).every((row) => row?.done && row.reps.trim() && row.rpe.trim()),
+    ).every((row) => exercise.unilateral ? Boolean(row?.left?.done && row.left.reps.trim() && row.left.rpe.trim() && row?.right?.done && row.right.reps.trim() && row.right.rpe.trim()) : Boolean(row?.done && row.reps.trim() && row.rpe.trim())),
   );
   const recoveryDone = (day.recovery ?? []).filter(
     (module) => draft.recoveryCompleted[module.id],
