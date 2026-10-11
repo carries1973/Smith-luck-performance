@@ -3,7 +3,7 @@
 /* Timers and local-device hydration intentionally use the current clock and client effects. */
 /* eslint-disable react-hooks/purity, react-hooks/set-state-in-effect */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -30,6 +30,8 @@ import {
   TimerReset,
   Wind,
 } from "lucide-react";
+import { enableTimerAudio, signalTimer } from "@/lib/timer-audio";
+import { isPerSide, completedSet, validSet, describeSet, measurement } from "@/lib/workout-log";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -65,7 +67,9 @@ type WorkoutDay = {
   exercises?: Exercise[];
   recovery?: RecoveryModule[];
 };
-type SetEntry = { weight: string; reps: string; rpe: string; done: boolean };
+type SideEntry = { weight: string; reps: string; rpe: string; done: boolean };
+type SetEntry = SideEntry & { sides?: { left: SideEntry; right: SideEntry } };
+type Countdown = { remaining: number; startedAt: number | null; finished?: boolean };
 type Readiness = {
   sleep: number;
   energy: number;
@@ -96,6 +100,7 @@ type WorkoutDraft = {
   running: boolean;
   updatedAt: number;
   sets: Record<string, SetEntry[]>;
+  timers: Record<string, Countdown>;
   exerciseNotes: Record<string, string>;
   workoutNotes: string;
   readiness: Readiness;
@@ -378,7 +383,7 @@ const workoutDays: WorkoutDay[] = [
         name: "Alternating Dumbbell Curl",
         type: "Accessory",
         sets: 3,
-        reps: "10–12",
+        reps: "10–12 / side",
         rpe: "8",
         rest: 60,
         note: "No torso swing; lower under control.",
@@ -601,6 +606,7 @@ const freshDraft = (dayId: number): WorkoutDraft => ({
   running: false,
   updatedAt: Date.now(),
   sets: {},
+  timers: {},
   exerciseNotes: {},
   workoutNotes: "",
   readiness: { ...defaultReadiness },
@@ -649,6 +655,7 @@ const normalizeDraft = (
     readiness: { ...defaultReadiness, ...value.readiness },
     readinessConfirmed: value.readinessConfirmed ?? false,
     conditioning: { ...freshConditioning(), ...value.conditioning },
+    timers: value.timers ?? {},
   };
 };
 const readinessResult = (r: Readiness): ReadinessResult => {
@@ -1207,183 +1214,99 @@ function WorkoutTimer({
     </section>
   );
 }
-function RestTimer({ initial }: { initial: number }) {
-  const [remaining, setRemaining] = useState(initial);
-  const [startedAt, setStartedAt] = useState<number | null>(null);
-  const [base, setBase] = useState(initial);
+function RestTimer({ initial, state, onChange, label = "Rest timer" }: {
+  initial: number; state?: Countdown; onChange: (state: Countdown) => void; label?: string;
+}) {
+  const value = state ?? { remaining: initial, startedAt: null };
+  const [now, setNow] = useState(Date.now());
+  const alerted = useRef<number | null>(null);
+  const remaining = value.startedAt
+    ? Math.max(0, value.remaining - Math.floor((now - value.startedAt) / 1000))
+    : value.remaining;
   useEffect(() => {
-    if (!startedAt) return;
-    const tick = () => {
-      const next = Math.max(
-        0,
-        base - Math.floor((Date.now() - startedAt) / 1000),
-      );
-      setRemaining(next);
-      if (next === 0) setStartedAt(null);
-    };
-    tick();
-    const timer = window.setInterval(tick, 500);
+    if (!value.startedAt) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 250);
     return () => window.clearInterval(timer);
-  }, [startedAt, base]);
+  }, [value.startedAt]);
+  useEffect(() => {
+    if (value.startedAt && remaining === 0 && alerted.current !== value.startedAt) {
+      alerted.current = value.startedAt;
+      signalTimer();
+      onChange({ remaining: 0, startedAt: null, finished: true });
+    }
+  }, [remaining, value.startedAt, onChange]);
   const toggle = () => {
-    if (startedAt) {
-      setBase(remaining);
-      setStartedAt(null);
-    } else setStartedAt(Date.now());
-  };
-  const reset = () => {
-    setStartedAt(null);
-    setBase(initial);
-    setRemaining(initial);
+    setNow(Date.now());
+    if (value.startedAt) onChange({ remaining, startedAt: null });
+    else {
+      enableTimerAudio();
+      alerted.current = null;
+      onChange({ remaining: remaining || initial, startedAt: Date.now(), finished: false });
+    }
   };
   return (
     <div className="rest-timer">
-      <div>
-        <TimerReset />
-        <span>Rest timer</span>
-        <strong>{formatShortTime(remaining)}</strong>
-      </div>
+      <div><TimerReset /><span>{label}</span><strong>{formatShortTime(remaining)}</strong></div>
       <div>
         <Button size="sm" variant="outline" onClick={toggle}>
-          {startedAt ? <Pause /> : <Play />}
-          {startedAt ? "Pause" : "Start"}
+          {value.startedAt ? <Pause /> : <Play />}{value.startedAt ? "Pause" : remaining === 0 ? "Restart" : "Start"}
         </Button>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          aria-label="Reset rest timer"
-          onClick={reset}
-        >
-          <RotateCcw />
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => {
-            setStartedAt(null);
-            setBase(remaining + 15);
-            setRemaining(remaining + 15);
-          }}
-        >
-          <Plus />
-          15
-        </Button>
+        <Button size="icon-sm" variant="ghost" aria-label={`Reset ${label}`} onClick={() => onChange({ remaining: initial, startedAt: null })}><RotateCcw /></Button>
+        <Button size="sm" variant="ghost" onClick={() => {
+          setNow(Date.now());
+          onChange({ remaining: remaining + 15, startedAt: value.startedAt ? Date.now() : null, finished: false });
+        }}><Plus />15 sec</Button>
       </div>
+      {value.finished && <p className="timer-finished" role="status">{label === "Rest timer" ? "Rest complete — ready for your next set." : "Timer complete."}</p>}
     </div>
   );
 }
-function SetLogger({
-  exercise,
-  values,
-  onChange,
-}: {
-  exercise: Exercise;
-  values: SetEntry[];
-  onChange: (rows: SetEntry[]) => void;
+function SetLogger({ exercise, values, onChange }: {
+  exercise: Exercise; values: SetEntry[]; onChange: (rows: SetEntry[]) => void;
 }) {
-  const rows = Array.from(
-    { length: exercise.sets },
-    (_, i) => values[i] ?? { weight: "", reps: "", rpe: "", done: false },
-  );
-  const change = (
-    index: number,
-    key: keyof SetEntry,
-    value: string | boolean,
-  ) => {
+  const blank = (): SideEntry => ({ weight: "", reps: "", rpe: "", done: false });
+  const rows = Array.from({ length: exercise.sets }, (_, i) => values[i] ?? blank());
+  const perSide = isPerSide(exercise);
+  const unit = measurement(exercise);
+  const change = (index: number, key: keyof SideEntry, value: string | boolean, side?: "left" | "right") => {
     const next = [...rows];
-    next[index] = { ...next[index], [key]: value };
+    if (side) {
+      const sides = next[index].sides ?? { left: blank(), right: blank() };
+      const updated = { ...sides, [side]: { ...sides[side], [key]: value } };
+      next[index] = { ...next[index], sides: updated, done: updated.left.done && updated.right.done };
+    } else next[index] = { ...next[index], [key]: value };
     onChange(next);
   };
   return (
     <div className="set-logger">
-      <div className="set-grid set-grid-head">
-        <span>Set</span>
-        <span>Weight</span>
-        <span>Reps</span>
-        <span>RPE</span>
-        <span>Done</span>
-      </div>
-      {rows.map((row, index) => (
-        <div className="set-grid" key={index}>
-          <strong>{index + 1}</strong>
-          <Input
-            inputMode="decimal"
-            aria-label={`${exercise.name} set ${index + 1} weight`}
-            placeholder="lb"
-            value={row.weight}
-            onChange={(e) => change(index, "weight", e.target.value)}
-          />
-          <Input
-            inputMode="numeric"
-            aria-label={`${exercise.name} set ${index + 1} reps`}
-            placeholder={exercise.reps.split(" ")[0]}
-            value={row.reps}
-            onChange={(e) => change(index, "reps", e.target.value)}
-          />
-          <Input
-            inputMode="decimal"
-            aria-label={`${exercise.name} set ${index + 1} RPE`}
-            placeholder={exercise.rpe}
-            value={row.rpe}
-            onChange={(e) => change(index, "rpe", e.target.value)}
-          />
-          <button
-            className={`set-check ${row.done ? "checked" : ""}`}
-            aria-label={`Mark ${exercise.name} set ${index + 1} complete`}
-            aria-pressed={row.done}
-            onClick={() => change(index, "done", !row.done)}
-          >
-            {row.done && <Check />}
-          </button>
-        </div>
-      ))}
+      {perSide && <p className="side-hint">Log each side separately. Weight is the load used on that side.</p>}
+      <div className="set-grid set-grid-head"><span>Set</span><span>Weight lb</span><span>{unit}</span><span>RPE</span><span>Done</span></div>
+      {rows.map((row, index) => <div key={index}>
+        {perSide && !row.sides && (row.done || row.reps || row.weight) && <p className="side-hint">Earlier combined entry preserved: {describeSet(row, index, exercise)}. Add left/right values for separate tracking.</p>}
+        {(perSide ? (["left", "right"] as const) : [undefined]).map((side) => {
+          const entry = side ? row.sides?.[side] ?? blank() : row;
+          const title = `${exercise.name} set ${index + 1}${side ? ` ${side}` : ""}`;
+          return <div className="set-grid" key={side ?? "both"}>
+            <strong>{index + 1}{side && <small className="side-label">{side === "left" ? "L" : "R"}</small>}</strong>
+            <Input inputMode="decimal" aria-label={`${title} weight`} placeholder="lb" value={entry.weight} onChange={(e) => change(index, "weight", e.target.value, side)} />
+            <Input inputMode="numeric" aria-label={`${title} ${unit}`} placeholder={exercise.reps.split(" ")[0]} value={entry.reps} onChange={(e) => change(index, "reps", e.target.value, side)} />
+            <Input inputMode="decimal" aria-label={`${title} RPE`} placeholder={exercise.rpe} value={entry.rpe} onChange={(e) => change(index, "rpe", e.target.value, side)} />
+            <button className={`set-check ${entry.done ? "checked" : ""}`} aria-label={`Mark ${title} complete`} aria-pressed={entry.done} onClick={() => change(index, "done", !entry.done, side)}>{entry.done && <Check />}</button>
+          </div>;
+        })}
+      </div>)}
     </div>
   );
 }
-function PreviousPerformance({
-  exercise,
-  history,
-}: {
-  exercise: Exercise;
-  history: SessionLog[];
-}) {
-  const previous = history.find((session) => session.exercises?.[exercise.id])
-    ?.exercises[exercise.id];
-  const completed =
-    previous?.sets.filter((set) => set.done && set.weight && set.reps) ?? [];
-  if (!completed.length)
-    return (
-      <div className="previous-performance">
-        <span>Previous performance</span>
-        <strong>Establish your baseline today</strong>
-      </div>
-    );
-  const top = [...completed].sort(
-    (a, b) => Number(b.weight) - Number(a.weight),
-  )[0];
-  const upperRep = Number((exercise.reps.match(/\d+/g) ?? ["0"]).at(-1));
-  const targetRpe = Number(exercise.rpe.split("–")[0]);
-  const progressionReady =
-    completed.length === exercise.sets &&
-    completed.every(
-      (set) =>
-        set.rpe && Number(set.rpe) <= targetRpe && Number(set.reps) >= upperRep,
-    );
-  return (
-    <div className="previous-stack">
-      <div className="previous-performance">
-        <span>Previous performance</span>
-        <strong>
-          {top.weight} lb × {top.reps} · RPE {top.rpe || "—"}
-        </strong>
-      </div>
-      <p>
-        {progressionReady
-          ? "Coach: every prescribed set reached the top of the rep range at target RPE—consider a small load increase."
-          : "Coach: repeat or adjust the load until every prescribed set reaches the target range with a recorded RPE."}
-      </p>
-    </div>
-  );
+function PreviousPerformance({ exercise, history }: { exercise: Exercise; history: SessionLog[] }) {
+  const session = history.find((session) => session.exercises?.[exercise.id]?.sets.some((set) => completedSet(set)));
+  const previous = session?.exercises[exercise.id];
+  return <div className="previous-stack">
+    <div className="previous-performance"><span>Previous performance{session ? ` · ${session.date}` : ""}</span><strong>{session ? "Your recorded sets" : "Establish your baseline today"}</strong></div>
+    {previous && <ul className="previous-sets">{previous.sets.map((set, index) => completedSet(set) ? <li key={index}>{describeSet(set, index, exercise)}</li> : null)}</ul>}
+    {previous?.notes && <p>Previous notes: {previous.notes}</p>}
+  </div>;
 }
 function ExerciseCard({
   exercise,
@@ -1393,7 +1316,11 @@ function ExerciseCard({
   onChange,
   onNotes,
   history,
+  timer,
+  onTimer,
 }: {
+  timer?: Countdown;
+  onTimer: (state: Countdown) => void;
   exercise: Exercise;
   index: number;
   values: SetEntry[];
@@ -1442,7 +1369,7 @@ function ExerciseCard({
         </div>
         <p className="coach-note">{exercise.note}</p>
         <SetLogger exercise={exercise} values={values} onChange={onChange} />
-        {exercise.rest > 0 && <RestTimer initial={exercise.rest} />}
+        {exercise.rest > 0 && <RestTimer initial={exercise.rest} state={timer} onChange={onTimer} />}
         <label className="notes-label">
           Exercise notes
           <Textarea
@@ -1503,27 +1430,6 @@ function IntervalTimer({
     const timer = window.setInterval(() => setNow(Date.now()), 500);
     return () => window.clearInterval(timer);
   }, [state.running]);
-  const signal = () => {
-    try {
-      navigator.vibrate?.([180, 80, 180]);
-      const AudioContextClass =
-        window.AudioContext ||
-        (window as typeof window & { webkitAudioContext?: typeof AudioContext })
-          .webkitAudioContext;
-      if (AudioContextClass) {
-        const context = new AudioContextClass();
-        const oscillator = context.createOscillator();
-        const gain = context.createGain();
-        oscillator.frequency.value = 740;
-        gain.gain.value = 0.08;
-        oscillator.connect(gain);
-        gain.connect(context.destination);
-        oscillator.start();
-        oscillator.stop(context.currentTime + 0.18);
-        oscillator.onended = () => void context.close();
-      }
-    } catch {}
-  };
   const advance = useCallback(() => {
     let block = state.block;
     let spill =
@@ -1545,7 +1451,7 @@ function IntervalTimer({
       block += 1;
       const duration = conditioningBlocks[block].duration;
       if (spill < duration) {
-        signal();
+        signalTimer();
         onChange({
           ...state,
           block,
@@ -1565,7 +1471,7 @@ function IntervalTimer({
       });
       spill -= duration;
     }
-    signal();
+    signalTimer();
     onChange({
       ...state,
       block: conditioningBlocks.length - 1,
@@ -1581,10 +1487,11 @@ function IntervalTimer({
   useEffect(() => {
     if (state.running && remaining === 0) advance();
   }, [state.running, remaining, advance]);
-  const toggle = () =>
-    state.running
-      ? onChange({ ...state, remaining, startedAt: null, running: false })
-      : onChange({ ...state, startedAt: Date.now(), running: true });
+  const toggle = () => {
+    setNow(Date.now());
+    if (state.running) onChange({ ...state, remaining, startedAt: null, running: false });
+    else { enableTimerAudio(); onChange({ ...state, startedAt: Date.now(), running: true }); }
+  };
   const reset = () => onChange(freshConditioning());
   const next = conditioningBlocks[state.block + 1];
   return (
@@ -1595,7 +1502,7 @@ function IntervalTimer({
           <h2>5:00 warm-up · 8 × 2:00 / 2:00 · 3:00 cool-down</h2>
           <p>
             Every block is timed and recorded · 40 minutes total · sound and
-            vibration alert at transitions
+            alerts at transitions while the app is open
           </p>
         </div>
         <Gauge />
@@ -1652,7 +1559,7 @@ function IntervalTimer({
           </Button>
           <Button
             variant="outline"
-            onClick={advance}
+            onClick={() => { enableTimerAudio(); advance(); }}
             disabled={state.completed}
           >
             Complete block
@@ -1753,11 +1660,31 @@ function RecoveryGrid({
                 )}
               </Button>
             </div>
+            <RestTimer initial={Number(module.duration.match(/\d+/)?.[0] ?? 5) * 60} label={`${module.name} timer`} state={draft.timers[module.id]} onChange={(timer) => onChange({ ...draft, timers: { ...draft.timers, [module.id]: timer }, updatedAt: Date.now() })} />
           </article>
         );
       })}
     </section>
   );
+}
+function TimerAlerts() {
+  const [tested, setTested] = useState(false);
+  return <div className="timer-alerts"><Button size="sm" variant="outline" onClick={() => { enableTimerAudio(); signalTimer(); setTested(true); }}>Test timer sound</Button><span>{tested ? "Sound test requested. " : ""}Keep this workout visible and your screen awake for timer alerts. iPhone does not support vibration here.</span></div>;
+}
+function PreviousSession({ day, history }: { day: WorkoutDay; history: SessionLog[] }) {
+  const previous = history.find((session) => session.dayId === day.id);
+  return <section className="previous-session">
+    <div className="previous-performance"><span>Previous {day.name} session</span><strong>{previous ? `${previous.date} · ${formatTime(previous.duration)} · ${(previous.completionStatus ?? "complete").replaceAll("-", " ")}` : "No saved session for this day yet"}</strong></div>
+    {previous && <details><summary>View previous workout summary</summary>
+      {Object.entries(previous.exercises ?? {}).map(([id, log]) => {
+        const exercise = day.exercises?.find((item) => item.id === id);
+        return <div key={id}><h3>{exercise?.name ?? id}</h3><ul className="previous-sets">{log.sets.map((set, i) => completedSet(set) ? <li key={i}>{describeSet(set, i, exercise)}</li> : null)}</ul>{log.notes && <p>{log.notes}</p>}</div>;
+      })}
+      {previous.conditioning && <p>{previous.conditioning.logs.length} intervals recorded · {previous.conditioning.completed ? "Full session completed" : "Session ended early"}</p>}
+      {day.recovery?.map((module) => <p key={module.id}>{module.name}: {previous.recoveryCompleted?.[module.id] ? "Completed" : "Not completed"} · {previous.recoveryDurations?.[module.id] || "No duration recorded"}</p>)}
+      <p>{previous.workoutNotes || "No session notes recorded."}</p>
+    </details>}
+  </section>;
 }
 function WorkoutScreen({
   day,
@@ -1795,14 +1722,14 @@ function WorkoutScreen({
       Array.from(
         { length: exercise.sets },
         (_, index) => draft.sets[exercise.id]?.[index],
-      ).filter((row) => row?.done).length,
+      ).filter((row) => row && (isPerSide(exercise) ? !!row.sides && row.sides.left.done && row.sides.right.done : row.done)).length,
     0,
   );
   const validSets = exercises.every((exercise) =>
     Array.from(
       { length: exercise.sets },
       (_, index) => draft.sets[exercise.id]?.[index],
-    ).every((row) => row?.done && row.reps.trim() && row.rpe.trim()),
+    ).every((row) => validSet(row, isPerSide(exercise))),
   );
   const recoveryDone = (day.recovery ?? []).filter(
     (module) => draft.recoveryCompleted[module.id],
@@ -1811,8 +1738,7 @@ function WorkoutScreen({
     day.type === "strength"
       ? setDone
       : day.type === "conditioning"
-        ? draft.conditioning.logs.length +
-          (draft.conditioning.completed ? 1 : 0)
+        ? draft.conditioning.logs.length
         : recoveryDone;
   const progressTotal =
     day.type === "strength"
@@ -1886,6 +1812,7 @@ function WorkoutScreen({
         onPrev={() => onSelect(day.id === 1 ? 7 : day.id - 1)}
         onNext={() => onSelect(day.id === 7 ? 1 : day.id + 1)}
       />
+      <PreviousSession day={day} history={history} />
       <ReadinessPanel
         value={draft.readiness}
         confirmed={draft.readinessConfirmed}
@@ -1944,6 +1871,7 @@ function WorkoutScreen({
         onChange={onDraft}
         onRequestFinish={() => setConfirming("finish")}
       />
+      <TimerAlerts />
       <section className="workout-progress">
         <div>
           <span>Workout progress</span>
@@ -1967,6 +1895,8 @@ function WorkoutScreen({
               values={draft.sets[exercise.id] ?? []}
               notes={draft.exerciseNotes[exercise.id] ?? ""}
               history={history}
+              timer={draft.timers[exercise.id]}
+              onTimer={(timer) => onDraft({ ...draft, timers: { ...draft.timers, [exercise.id]: timer }, updatedAt: Date.now() })}
               onChange={(rows) =>
                 onDraft({
                   ...draft,
@@ -2358,8 +2288,8 @@ function HistoryView({
                             <p>
                               {log.sets
                                 .map((set, index) =>
-                                  set.done
-                                    ? `S${index + 1}: ${set.weight || "—"} lb × ${set.reps || "—"} @ ${set.rpe || "—"}`
+                                  completedSet(set)
+                                    ? describeSet(set, index, exercise)
                                     : null,
                                 )
                                 .filter(Boolean)
