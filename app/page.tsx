@@ -31,6 +31,7 @@ import {
   Wind,
 } from "lucide-react";
 import { enableTimerAudio, signalTimer } from "@/lib/timer-audio";
+import CloudBackup from "@/components/cloud-backup";
 import { isPerSide, completedSet, validSet, describeSet, measurement } from "@/lib/workout-log";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -2497,6 +2498,7 @@ export default function HomePage() {
   return (
     <div className="app">
       <AppHeader view={view} onView={setView} />
+      <CloudBackup hydrated={hydrated} history={history} drafts={drafts} onRestore={(items, savedDrafts) => { setHistory(items); setDrafts(savedDrafts); }} />
       {view === "dashboard" && (
         <Dashboard
           selectedId={selectedId}
