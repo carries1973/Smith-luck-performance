@@ -20,6 +20,9 @@ export default function CloudBackup<T extends RecordWithId,D>({hydrated,history,
  useEffect(()=>{let active=true;void validSession().then(s=>{if(active)setSession(s)});return()=>{active=false}},[]);
  useEffect(()=>{
   if(!hydrated||!session||initialized.current===session.user.id)return;
+  const ownerKey='smith-luck-cloud-owner-v1';
+  const existingOwner=localStorage.getItem(ownerKey);
+  if(existingOwner && existingOwner!==session.user.id){setStatus('This device has workout data linked to another account. Cloud sync blocked.');return;}
   initialized.current=session.user.id;setReady(false);
   let active=true;
   void(async()=>{
@@ -34,6 +37,7 @@ export default function CloudBackup<T extends RecordWithId,D>({hydrated,history,
     await writeJournal(session,{history:combined,drafts:mergedDrafts});
     if(!active)return;
     lastSaved.current=JSON.stringify({history:combined,drafts:mergedDrafts});
+    localStorage.setItem(ownerKey,session.user.id);
     restoreRef.current(combined,mergedDrafts);setReady(true);setStatus("Cloud backup connected");
    }catch(e){if(active)setStatus("Cloud sync failed. Local data retained: "+String(e))}
   })();
