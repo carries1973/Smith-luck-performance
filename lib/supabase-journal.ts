@@ -14,7 +14,7 @@ export function saveSession(data:Record<string,unknown>):AuthSession {
 export function signOutLocal(){localStorage.removeItem(SESSION_KEY);}
 async function request(path:string,init:RequestInit={},token?:string){
  const response=await fetch(SUPABASE_URL+path,{...init,headers:{"apikey":PUBLIC_KEY,"Content-Type":"application/json",...(token?{"Authorization":"Bearer "+token}:{}),...init.headers}});
- const body=await response.json().catch(()=>({}));
+ const body=(await response.json().catch(()=>({}))) as Record<string,unknown>;
  if(!response.ok)throw new Error(String(body.msg||body.error_description||body.message||body.error||"Supabase request failed"));
  return body;
 }
