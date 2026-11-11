@@ -15,6 +15,8 @@ export default function CloudBackup<T extends RecordWithId,D>({hydrated,history,
  const latest=useRef({history,drafts});
  const lastSaved=useRef("");
  latest.current={history,drafts};
+ const restoreRef=useRef(onRestore);
+ restoreRef.current=onRestore;
  useEffect(()=>{let active=true;void validSession().then(s=>{if(active)setSession(s)});return()=>{active=false}},[]);
  useEffect(()=>{
   if(!hydrated||!session||initialized.current===session.user.id)return;
@@ -32,11 +34,11 @@ export default function CloudBackup<T extends RecordWithId,D>({hydrated,history,
     await writeJournal(session,{history:combined,drafts:mergedDrafts});
     if(!active)return;
     lastSaved.current=JSON.stringify({history:combined,drafts:mergedDrafts});
-    onRestore(combined,mergedDrafts);setReady(true);setStatus("Cloud backup connected");
+    restoreRef.current(combined,mergedDrafts);setReady(true);setStatus("Cloud backup connected");
    }catch(e){if(active)setStatus("Cloud sync failed. Local data retained: "+String(e))}
   })();
   return()=>{active=false};
- },[hydrated,session,onRestore]);
+ },[hydrated,session]);
  useEffect(()=>{
   if(!ready||!session||!hydrated)return;
   const payload={history,drafts};const serialized=JSON.stringify(payload);
